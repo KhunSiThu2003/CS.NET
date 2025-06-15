@@ -4,6 +4,7 @@ using System.Configuration;
 using System.Data.SqlClient;
 using System.Web.Security; // For password hashing
 using System.Web.UI;
+using System.Web.UI.WebControls;
 
 namespace JobFinder.User
 {
@@ -144,6 +145,12 @@ namespace JobFinder.User
             txtMobile.Text = string.Empty;
             txtAddress.Text = string.Empty;
             ddlCountry.ClearSelection();
+        }
+
+        // Add this new method to handle terms validation
+        protected void cvTerms_ServerValidate(object source, ServerValidateEventArgs args)
+        {
+            args.IsValid = chkTerms.Checked;
         }
     }
 }

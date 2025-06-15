@@ -437,9 +437,12 @@
     <Content Include="User\About.aspx" />
     <Content Include="User\Contact.aspx" />
     <Content Include="User\Default.aspx" />
+    <Content Include="User\ForgotPassword.aspx" />
     <Content Include="User\JobDetails.aspx" />
     <Content Include="User\JobListing.aspx" />
+    <Content Include="User\Login.aspx" />
     <Content Include="User\Register.aspx" />
+    <Content Include="User\VerifyOtp.aspx" />
     <Content Include="Web.config" />
   </ItemGroup>
   <ItemGroup>
@@ -468,6 +471,13 @@
     <Compile Include="User\Default.aspx.designer.cs">
       <DependentUpon>Default.aspx</DependentUpon>
     </Compile>
+    <Compile Include="User\ForgotPassword.aspx.cs">
+      <DependentUpon>ForgotPassword.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="User\ForgotPassword.aspx.designer.cs">
+      <DependentUpon>ForgotPassword.aspx</DependentUpon>
+    </Compile>
     <Compile Include="User\JobDetails.aspx.cs">
       <DependentUpon>JobDetails.aspx</DependentUpon>
       <SubType>ASPXCodeBehind</SubType>
@@ -482,6 +492,13 @@
     <Compile Include="User\JobListing.aspx.designer.cs">
       <DependentUpon>JobListing.aspx</DependentUpon>
     </Compile>
+    <Compile Include="User\Login.aspx.cs">
+      <DependentUpon>Login.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="User\Login.aspx.designer.cs">
+      <DependentUpon>Login.aspx</DependentUpon>
+    </Compile>
     <Compile Include="User\Register.aspx.cs">
       <DependentUpon>Register.aspx</DependentUpon>
       <SubType>ASPXCodeBehind</SubType>
@@ -495,6 +512,13 @@
     </Compile>
     <Compile Include="User\User.Master.designer.cs">
       <DependentUpon>User.Master</DependentUpon>
+    </Compile>
+    <Compile Include="User\VerifyOtp.aspx.cs">
+      <DependentUpon>VerifyOtp.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="User\VerifyOtp.aspx.designer.cs">
+      <DependentUpon>VerifyOtp.aspx</DependentUpon>
     </Compile>
   </ItemGroup>
   <ItemGroup>
