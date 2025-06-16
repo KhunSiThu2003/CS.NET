@@ -1,8 +1,8 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Configuration;
 using System.Data.SqlClient;
-using System.Web.Security; // For password hashing
+using System.Net.Mail;
+using System.Web.Security;
 using System.Web.UI;
 using System.Web.UI.WebControls;
 
@@ -10,13 +10,21 @@ namespace JobFinder.User
 {
     public partial class Register : System.Web.UI.Page
     {
-        string str = ConfigurationManager.ConnectionStrings["JobFinderContext"].ConnectionString;
+        private readonly string _connectionString;
+        private readonly string _emailFromAddress;
+        private readonly int _otpTimeoutMinutes = 10;
+
+        public Register()
+        {
+            _connectionString = ConfigurationManager.ConnectionStrings["JobFinderContext"].ConnectionString;
+            _emailFromAddress = ConfigurationManager.AppSettings["EmailFromAddress"] ?? "no-reply@jobfinder.com";
+        }
 
         protected void Page_Load(object sender, EventArgs e)
         {
             if (!IsPostBack)
             {
-                // Any initialization code can go here
+                messagePanel.Visible = false;
             }
         }
 
@@ -24,130 +32,141 @@ namespace JobFinder.User
         {
             if (Page.IsValid)
             {
-                using (SqlConnection con = new SqlConnection(str))
+                using (SqlConnection con = new SqlConnection(_connectionString))
                 {
                     try
                     {
                         con.Open();
 
-                        // 1. First check if username/email/mobile already exists
-                        string checkQuery = @"
-                    SELECT 
-                        COALESCE(SUM(CASE WHEN Username = @Username THEN 1 ELSE 0 END), 0) as UsernameExists,
-                        COALESCE(SUM(CASE WHEN Email = @Email THEN 1 ELSE 0 END), 0) as EmailExists,
-                        COALESCE(SUM(CASE WHEN Mobile = @Mobile THEN 1 ELSE 0 END), 0) as MobileExists
-                    FROM [Users] 
-                    WHERE Username = @Username OR Email = @Email OR Mobile = @Mobile";
-
-                        using (SqlCommand checkCmd = new SqlCommand(checkQuery, con))
+                        // Check if user exists
+                        if (UserExists(con, txtUserName.Text.Trim(), txtEmail.Text.Trim(), txtMobile.Text.Trim()))
                         {
-                            checkCmd.Parameters.AddWithValue("@Username", txtUserName.Text.Trim());
-                            checkCmd.Parameters.AddWithValue("@Email", txtEmail.Text.Trim());
-                            checkCmd.Parameters.AddWithValue("@Mobile", txtMobile.Text.Trim());
-
-                            using (SqlDataReader reader = checkCmd.ExecuteReader())
-                            {
-                                if (reader.Read())
-                                {
-                                    int usernameExists = reader.GetInt32(0);
-                                    int emailExists = reader.GetInt32(1);
-                                    int mobileExists = reader.GetInt32(2);
-
-                                    if (usernameExists > 0 || emailExists > 0 || mobileExists > 0)
-                                    {
-                                        messagePanel.CssClass = "alert alert-danger";
-                                        messagePanel.Visible = true;
-
-                                        List<string> existingItems = new List<string>();
-                                        if (usernameExists > 0) existingItems.Add("Username");
-                                        if (emailExists > 0) existingItems.Add("Email");
-                                        if (mobileExists > 0) existingItems.Add("Mobile Number");
-
-                                        litMessage.Text = "The following already exist: " + string.Join(", ", existingItems);
-                                        return;
-                                    }
-                                }
-                            }
+                            ShowErrorMessage("Username, email or mobile already exists");
+                            return;
                         }
 
-                        // 2. If checks pass, proceed with registration
-                        string insertQuery = @"
-                    INSERT INTO [Users] 
-                    (Username, Password, Name, Address, Mobile, Email, Country) 
-                    VALUES 
-                    (@Username, @Password, @Name, @Address, @Mobile, @Email, @Country);
-                    SELECT SCOPE_IDENTITY();";
+                        // Hash password
+                        string hashedPassword = FormsAuthentication.HashPasswordForStoringInConfigFile(
+                            txtConfirmPassword.Text.Trim(), "SHA1");
 
-                        using (SqlCommand insertCmd = new SqlCommand(insertQuery, con))
+                        // Generate verification code
+                        string verificationCode = new Random().Next(100000, 999999).ToString();
+                        DateTime expiryTime = DateTime.Now.AddMinutes(_otpTimeoutMinutes);
+
+                        // Insert new user (unverified)
+                        int newUserId = InsertUser(con, hashedPassword, verificationCode, expiryTime);
+
+                        if (newUserId > 0)
                         {
-                            // Hash the password (consider upgrading to more secure hashing like PBKDF2)
-                            string hashedPassword = FormsAuthentication.HashPasswordForStoringInConfigFile(
-                                txtConfirmPassword.Text.Trim(), "SHA1");
+                            // Send verification email
+                            SendVerificationEmail(txtEmail.Text.Trim(), txtFullName.Text.Trim(), verificationCode);
 
-                            insertCmd.Parameters.AddWithValue("@Username", txtUserName.Text.Trim());
-                            insertCmd.Parameters.AddWithValue("@Password", hashedPassword);
-                            insertCmd.Parameters.AddWithValue("@Name", txtFullName.Text.Trim());
-                            insertCmd.Parameters.AddWithValue("@Address",
-                                string.IsNullOrEmpty(txtAddress.Text) ? DBNull.Value : (object)txtAddress.Text.Trim());
-                            insertCmd.Parameters.AddWithValue("@Mobile", txtMobile.Text.Trim());
-                            insertCmd.Parameters.AddWithValue("@Email", txtEmail.Text.Trim());
-                            insertCmd.Parameters.AddWithValue("@Country", ddlCountry.SelectedValue);
+                            // Store user info in session for verification
+                            Session["VerificationEmail"] = txtEmail.Text.Trim();
+                            Session["VerificationUserId"] = newUserId;
+                            Session["VerificationUsername"] = txtUserName.Text.Trim();
 
-                            // Execute and get the new user ID
-                            int newUserId = Convert.ToInt32(insertCmd.ExecuteScalar());
-
-                            if (newUserId > 0)
-                            {
-                                // Registration successful
-                                messagePanel.CssClass = "alert alert-success";
-                                messagePanel.Visible = true;
-                                litMessage.Text = "Registration successful! Welcome, " + txtFullName.Text.Trim();
-
-                                // Clear form
-                                ClearForm();
-
-                                // Optionally redirect to login or dashboard
-                                // Response.Redirect("~/User/Login.aspx");
-                            }
-                            else
-                            {
-                                throw new Exception("Registration failed - no rows affected");
-                            }
+                            // Redirect to verification page
+                            Response.Redirect("VerifyEmail.aspx");
                         }
-                    }
-                    catch (SqlException sqlEx)
-                    {
-                        // Handle SQL-specific errors
-                        messagePanel.CssClass = "alert alert-danger";
-                        messagePanel.Visible = true;
-                        litMessage.Text = "Database error occurred. Please try again later.";
-                        // Log the error: Logger.LogError(sqlEx);
                     }
                     catch (Exception ex)
                     {
-                        // Handle other exceptions
-                        messagePanel.CssClass = "alert alert-danger";
-                        messagePanel.Visible = true;
-                        litMessage.Text = "An unexpected error occurred. Please try again.";
-                        // Log the error: Logger.LogError(ex);
+                        ShowErrorMessage("Registration failed: " + ex.Message);
                     }
                 }
             }
         }
 
-        private void ClearForm()
+        private bool UserExists(SqlConnection con, string username, string email, string mobile)
         {
-            txtUserName.Text = string.Empty;
-            txtPassword.Text = string.Empty;
-            txtConfirmPassword.Text = string.Empty;
-            txtEmail.Text = string.Empty;
-            txtFullName.Text = string.Empty;
-            txtMobile.Text = string.Empty;
-            txtAddress.Text = string.Empty;
-            ddlCountry.ClearSelection();
+            string query = @"SELECT COUNT(*) FROM Users 
+                            WHERE Username = @Username OR Email = @Email OR Mobile = @Mobile";
+
+            using (SqlCommand cmd = new SqlCommand(query, con))
+            {
+                cmd.Parameters.AddWithValue("@Username", username);
+                cmd.Parameters.AddWithValue("@Email", email);
+                cmd.Parameters.AddWithValue("@Mobile", mobile);
+
+                return (int)cmd.ExecuteScalar() > 0;
+            }
         }
 
-        // Add this new method to handle terms validation
+        private int InsertUser(SqlConnection con, string hashedPassword, string verificationCode, DateTime expiryTime)
+        {
+            string query = @"INSERT INTO Users 
+                            (Username, Password, Name, Address, Mobile, Email, Country, 
+                             VerificationCode, VerificationExpiry, IsEmailVerified, CreatedDate)
+                            VALUES 
+                            (@Username, @Password, @Name, @Address, @Mobile, @Email, @Country,
+                             @VerificationCode, @VerificationExpiry, 0, GETDATE());
+                            SELECT SCOPE_IDENTITY();";
+
+            using (SqlCommand cmd = new SqlCommand(query, con))
+            {
+                cmd.Parameters.AddWithValue("@Username", txtUserName.Text.Trim());
+                cmd.Parameters.AddWithValue("@Password", hashedPassword);
+                cmd.Parameters.AddWithValue("@Name", txtFullName.Text.Trim());
+                cmd.Parameters.AddWithValue("@Address",
+                    string.IsNullOrEmpty(txtAddress.Text) ? DBNull.Value : (object)txtAddress.Text.Trim());
+                cmd.Parameters.AddWithValue("@Mobile", txtMobile.Text.Trim());
+                cmd.Parameters.AddWithValue("@Email", txtEmail.Text.Trim());
+                cmd.Parameters.AddWithValue("@Country", ddlCountry.SelectedValue);
+                cmd.Parameters.AddWithValue("@VerificationCode", verificationCode);
+                cmd.Parameters.AddWithValue("@VerificationExpiry", expiryTime);
+
+                return Convert.ToInt32(cmd.ExecuteScalar());
+            }
+        }
+
+        private void SendVerificationEmail(string email, string name, string verificationCode)
+        {
+            try
+            {
+                using (MailMessage mail = new MailMessage())
+                {
+                    mail.From = new MailAddress(_emailFromAddress, "JobFinder");
+                    mail.To.Add(email);
+                    mail.Subject = "Verify Your Email Address";
+                    mail.IsBodyHtml = true;
+                    mail.Body = CreateVerificationEmailBody(name, verificationCode);
+
+                    using (SmtpClient smtp = new SmtpClient())
+                    {
+                        smtp.Send(mail);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                throw new Exception("Failed to send verification email: " + ex.Message);
+            }
+        }
+
+        private string CreateVerificationEmailBody(string name, string verificationCode)
+        {
+            return $@"
+                <div style='font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;'>
+                    <h2 style='color: #FB246A;'>Email Verification</h2>
+                    <p>Hello {name},</p>
+                    <p>Thank you for registering with JobFinder. Please verify your email address by entering this code:</p>
+                    <div style='background: #F3F4F6; border-radius: 8px; padding: 16px; text-align: center; margin: 20px 0;'>
+                        <strong style='font-size: 24px; letter-spacing: 2px;'>{verificationCode}</strong>
+                    </div>
+                    <p>This code will expire in {_otpTimeoutMinutes} minutes.</p>
+                    <p>If you didn't request this, please ignore this email.</p>
+                    <p>Thanks,<br>The JobFinder Team</p>
+                </div>";
+        }
+
+        private void ShowErrorMessage(string message)
+        {
+            messagePanel.CssClass = "alert-message error";
+            messagePanel.Visible = true;
+            litMessage.Text = message;
+        }
+
         protected void cvTerms_ServerValidate(object source, ServerValidateEventArgs args)
         {
             args.IsValid = chkTerms.Checked;
